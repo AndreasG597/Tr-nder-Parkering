@@ -1,0 +1,84 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+const char* ssid = "NTNU-IOT";
+const char* password = "";
+
+const char* serverUrl = "http://10.25.18.141:5000/sensor";  // Flask server on Raspberry Pi
+
+// Ultrasonic sensor pins
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi connected!");
+}
+
+void loop() {
+  // Trigger ultrasonic pulse
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Read echo time
+  long duration = pulseIn(ECHO_PIN, HIGH);
+  float distance_cm = duration * 0.034 / 2;
+
+  Serial.print("Avstand: ");
+  Serial.print(distance_cm);
+  Serial.println(" cm");
+
+  // Determine if spot is occupied
+  int status = (distance_cm < 50.0) ? 1 : 0;
+
+  // Send to server
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(serverUrl);
+    http.addHeader("Content-Type", "application/json");
+
+    String payload = "{\"sensor_id\":\"ultra_1\",\"parkeringsplass_id\":1,\"verdi\":" + String(status) + "}";
+    int responseCode = http.POST(payload);
+
+    Serial.print("POST response: ");
+    Serial.println(responseCode);
+
+    if (responseCode > 0) {
+      String response = http.getString();
+      Serial.println("Server response: " + response);
+    } else {
+      Serial.println("Failed to send data.");
+    }
+
+    http.end();
+  }
+
+  // Light sleep etter hver måling (10 sek)
+  esp_sleep_enable_timer_wakeup(10 * 1000000); // 
+  esp_light_sleep_start();
+
+  // Etter light sleep: sørg for at Wi-Fi kobles til igjen
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.begin(ssid, password);
+    Serial.print("Reconnecting to Wi-Fi");
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+    }
+    Serial.println("\nWi-Fi reconnected!");
+  }
+}
